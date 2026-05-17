@@ -1,0 +1,23 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="sequence" />
+          <option value="fastapi" />
+          <option value="uvicorn" />
+          <option value="streamlit" />
+          <option value="requests" />
+          <option value="pydantic" />
+          <option value="pydantic-settings" />
+          <option value="python-multipart" />
+          <option value="pypdf" />
+          <option value="chromadb" />
+          <option value="openai" />
+          <option value="python-dotenv" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

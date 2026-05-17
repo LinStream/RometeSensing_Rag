@@ -1,0 +1,18 @@
+# 前后端
+fastapi
+uvicorn
+python-multipart
+pydantic
+streamlit
+requests
+
+# LangChain / RAG，与参考项目保持一致
+langchain
+langchain-community
+langchain-chroma
+langchain-text-splitters
+langchain-core
+dashscope
+chromadb
+pypdf
+pyyaml

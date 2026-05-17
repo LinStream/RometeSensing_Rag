@@ -1,0 +1,8 @@
+[project]
+name = "remotes-exercise"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "protobuf==3.20.3",
+    "uvicorn>=0.47.0",
+]
