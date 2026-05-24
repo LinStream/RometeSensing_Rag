@@ -32,21 +32,21 @@ def ensure_dashscope_api_key():
 
 class BaseModelFactory(ABC):
     @abstractmethod
-    def generator(self) -> Optional[Embeddings | BaseChatModel]:
+    def create(self) -> Optional[Embeddings | BaseChatModel]:
         pass
 
 
 class ChatModelFactory(BaseModelFactory):
-    def generator(self) -> Optional[Embeddings | BaseChatModel]:
+    def create(self) -> Optional[Embeddings | BaseChatModel]:
         ensure_dashscope_api_key()
         return ChatTongyi(model=rag_conf["chat_model_name"])
 
 
 class EmbeddingsFactory(BaseModelFactory):
-    def generator(self) -> Optional[Embeddings | BaseChatModel]:
+    def create(self) -> Optional[Embeddings | BaseChatModel]:
         ensure_dashscope_api_key()
         return DashScopeEmbeddings(model=rag_conf["embedding_model_name"])
 
 
-chat_model = ChatModelFactory().generator()
-embed_model = EmbeddingsFactory().generator()
+chat_model = ChatModelFactory().create()
+embed_model = EmbeddingsFactory().create()

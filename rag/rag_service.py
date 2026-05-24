@@ -1,8 +1,7 @@
 """
 RAG 总结服务类。
 
-尽量参考你提供的项目写法：
-PromptTemplate | print_prompt | chat_model | StrOutputParser
+LCEL 链：PromptTemplate -> log_prompt -> ChatTongyi -> StrOutputParser
 
 负责：
 1. 从向量库检索参考资料；
@@ -10,6 +9,7 @@ PromptTemplate | print_prompt | chat_model | StrOutputParser
 3. 调用模型生成回答。
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -21,19 +21,16 @@ from model.factory import chat_model
 from rag.vector_store import VectorStoreService
 from utils.prompt_loader import load_rag_prompts
 
+logger = logging.getLogger(__name__)
 
-def print_prompt(prompt):
-    """
-    调试函数：打印最终 prompt。
-    与参考项目保持一致。
-    """
-    print("=" * 20)
-    print(prompt.to_string())
-    print("=" * 20)
+
+def log_prompt(prompt):
+    """DEBUG 级别记录 prompt 内容，仅在调试时可见。"""
+    logger.debug("RAG prompt:\n%s", prompt.to_string())
     return prompt
 
 
-class RagSummarizeService(object):
+class RagSummarizeService:
     def __init__(self):
         self.vector_store = VectorStoreService()
         self.retriever = self.vector_store.get_retriever()
@@ -45,9 +42,9 @@ class RagSummarizeService(object):
     def _init_chain(self):
         """
         LCEL 链：
-        PromptTemplate -> print_prompt -> ChatTongyi -> StrOutputParser
+        PromptTemplate -> log_prompt -> ChatTongyi -> StrOutputParser
         """
-        chain = self.prompt_template | print_prompt | self.model | StrOutputParser()
+        chain = self.prompt_template | log_prompt | self.model | StrOutputParser()
         return chain
 
     def retriever_docs(self, query: str, top_k: int | None = None) -> list[Document]:

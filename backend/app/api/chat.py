@@ -7,14 +7,18 @@
 RAG 只是 Agent 可以调用的一个工具。
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.tool_context import get_tool_context, reset_tool_context
+from agent.tool_context import get_tool_context, reset_tool_context, set_tool_context
 from backend.app.crud import chat as chat_crud
 from backend.app.db.session import get_db
 from backend.app.schemas.chat import ChatAskRequest, ChatAskResponse
 from backend.app.services.runtime import react_agent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -57,6 +61,7 @@ async def ask(
     )
 
     reset_tool_context()
+    set_tool_context(history=history_text)
 
     try:
         answer = react_agent.invoke(
@@ -64,7 +69,8 @@ async def ask(
             history=history_text,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent 调用失败：{str(e)}")
+        logger.exception("Agent 调用失败")
+        raise HTTPException(status_code=500, detail="服务内部错误，请检查服务端日志。")
 
     ctx = get_tool_context()
     sources = ctx.get("sources", [])

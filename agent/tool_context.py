@@ -17,6 +17,7 @@ from typing import Any
 _DEFAULT_CONTEXT = {
     "tool": None,
     "sources": [],
+    "history": "",
 }
 
 _tool_context: ContextVar[dict[str, Any]] = ContextVar(
@@ -32,9 +33,13 @@ def reset_tool_context():
     _tool_context.set(_DEFAULT_CONTEXT.copy())
 
 
-def set_tool_context(tool: str | None = None, sources: list[dict] | None = None):
+def set_tool_context(
+    tool: str | None = None,
+    sources: list[dict] | None = None,
+    history: str | None = None,
+):
     """
-    工具执行时写入当前工具名和结构化来源。
+    工具执行时写入当前工具名、结构化来源和历史对话。
     """
     ctx = _tool_context.get().copy()
 
@@ -43,6 +48,9 @@ def set_tool_context(tool: str | None = None, sources: list[dict] | None = None)
 
     if sources is not None:
         ctx["sources"] = sources
+
+    if history is not None:
+        ctx["history"] = history
 
     _tool_context.set(ctx)
 

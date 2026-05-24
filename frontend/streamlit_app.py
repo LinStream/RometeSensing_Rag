@@ -18,7 +18,7 @@ import streamlit as st
 os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 os.environ["no_proxy"] = "127.0.0.1,localhost"
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 STREAM_DELAY = 0.006
 
 EXAMPLE_QUESTIONS = [
@@ -276,7 +276,7 @@ def refresh_documents():
     )
 
     if resp.status_code == 200:
-        st.session_state.documents = resp.json()
+        st.session_state.documents = resp.json().get("items", [])
     else:
         st.error(resp.text)
 

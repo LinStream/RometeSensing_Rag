@@ -38,3 +38,6 @@ build/
 
 # Backup files
 *~
+
+# Runtime state
+md5.text

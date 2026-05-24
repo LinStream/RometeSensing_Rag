@@ -10,7 +10,7 @@ LangChain Agent 工具集合。
 
 from langchain_core.tools import tool
 
-from agent.tool_context import set_tool_context
+from agent.tool_context import get_tool_context, set_tool_context
 
 
 def build_agent_tools(rag_service):
@@ -28,9 +28,16 @@ def build_agent_tools(rag_service):
 
         注意：
         - Agent tool 返回值主要给大模型继续组织最终回答，所以这里返回字符串；
-        - 结构化 sources 通过 tool_context 保存，供 FastAPI 接口返回和 MySQL 保存。
+        - 结构化 sources 通过 tool_context 保存，供 FastAPI 接口返回和 MySQL 保存；
+        - history 通过 tool_context 传入，让 RAG prompt 能理解多轮指代。
         """
-        result = rag_service.rag_summarize_with_sources(query=query)
+        ctx = get_tool_context()
+        history = ctx.get("history", "")
+
+        result = rag_service.rag_summarize_with_sources(
+            query=query,
+            history=history,
+        )
 
         sources = result.get("sources", [])
         set_tool_context(tool="rag_summarize", sources=sources)

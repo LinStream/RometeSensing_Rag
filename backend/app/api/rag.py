@@ -10,6 +10,7 @@
 - 清空知识库
 """
 
+import logging
 import os
 import shutil
 
@@ -22,7 +23,9 @@ from backend.app.schemas.rag import StatsResponse, UploadResponse
 from backend.app.services.runtime import rag_service
 from utils.config_handler import chroma_conf
 from utils.file_handler import get_file_md5_hex
-from utils.path_tool import get_abs_path
+from utils.path_tool import get_abs_path, sanitize_filename
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/rag", tags=["Knowledge Base"])
 
@@ -44,13 +47,18 @@ async def upload_file(
     """
     allowed_types = tuple(chroma_conf["allow_knowledge_file_type"])
 
-    if not file.filename.lower().endswith(allowed_types):
+    try:
+        safe_filename = sanitize_filename(file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not safe_filename.lower().endswith(allowed_types):
         raise HTTPException(
             status_code=400,
             detail=f"目前只支持以下文件类型：{allowed_types}",
         )
 
-    save_path = get_abs_path(f"{chroma_conf['data_path']}/{file.filename}")
+    save_path = get_abs_path(f"{chroma_conf['data_path']}/{safe_filename}")
 
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -81,9 +89,9 @@ async def upload_file(
 
     document = await document_crud.create_document(
         db=db,
-        filename=file.filename,
+        filename=safe_filename,
         file_path=save_path,
-        file_type=file.filename.split(".")[-1].lower(),
+        file_type=safe_filename.split(".")[-1].lower(),
         file_md5=file_md5,
     )
 
@@ -101,17 +109,18 @@ async def upload_file(
         )
 
     except Exception as e:
+        logger.exception("文件入库失败: %s", safe_filename)
         await document_crud.update_document_failed(
             db=db,
             document_id=document.id,
             error_message=str(e),
         )
 
-        raise HTTPException(status_code=500, detail=f"文件入库失败：{str(e)}")
+        raise HTTPException(status_code=500, detail="文件入库失败，请检查服务端日志。")
 
     return UploadResponse(
         message="文件上传并入库成功",
-        filename=file.filename,
+        filename=safe_filename,
         chunks_count=chunks_count,
         document_id=document.id,
     )
@@ -124,8 +133,9 @@ def stats():
     """
     try:
         return StatsResponse(**rag_service.stats())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取知识库状态失败：{str(e)}")
+    except (OSError, RuntimeError) as e:
+        logger.exception("读取知识库状态失败")
+        raise HTTPException(status_code=500, detail="读取知识库状态失败，请检查服务端日志。")
 
 
 @router.post("/load-all")
@@ -135,8 +145,9 @@ def load_all():
     """
     try:
         chunks_count = rag_service.load_all_documents()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"批量加载失败：{str(e)}")
+    except (ValueError, OSError, RuntimeError) as e:
+        logger.exception("批量加载失败")
+        raise HTTPException(status_code=500, detail="批量加载失败，请检查服务端日志。")
 
     return {
         "message": "批量加载完成",
@@ -151,7 +162,8 @@ def clear():
     """
     try:
         rag_service.clear()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清空知识库失败：{str(e)}")
+    except (OSError, RuntimeError) as e:
+        logger.exception("清空知识库失败")
+        raise HTTPException(status_code=500, detail="清空知识库失败，请检查服务端日志。")
 
     return {"message": "知识库已清空"}
