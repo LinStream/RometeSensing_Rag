@@ -13,6 +13,7 @@ import os
 from typing import List
 
 from langchain_chroma import Chroma
+from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -42,6 +43,13 @@ class VectorStoreService:
             separators=chroma_conf["separators"],
             length_function=len,
         )
+
+        # 混合检索配置
+        hybrid_conf = chroma_conf.get("hybrid_search", {})
+        self.hybrid_enabled = hybrid_conf.get("enabled", False)
+        self.bm25_top_k = hybrid_conf.get("bm25_top_k", 15)
+        self.rrf_k = hybrid_conf.get("rrf_k", 60)
+        self._bm25_retriever: BM25Retriever | None = None
 
     def get_retriever(self):
         """
@@ -176,6 +184,10 @@ class VectorStoreService:
 
         self._save_md5_hex(md5_hex)
 
+        # 重建 BM25 索引，保持与 Chroma 同步
+        if self.hybrid_enabled:
+            self._build_bm25_index()
+
         logger.info(f"[加载知识库] {file_path} 内容加载成功，chunks={len(split_documents)}")
 
         return len(split_documents)
@@ -204,13 +216,98 @@ class VectorStoreService:
 
     def search(self, query: str, top_k: int | None = None):
         """
-        检索接口，返回 Document 列表。
+        纯向量检索接口，返回 Document 列表。
         """
         if top_k is None:
             top_k = chroma_conf["k"]
 
         retriever = self.vector_store.as_retriever(search_kwargs={"k": top_k})
         return retriever.invoke(query)
+
+    def _build_bm25_index(self):
+        """
+        从 Chroma 拉取所有 chunk 文本，构建 BM25 索引。
+
+        BM25Retriever 的索引是内存中的，需要和 Chroma 保持同步。
+        策略：每次写操作（增/删）后调用此方法重建索引。
+        从 Chroma 拉取（而非自己维护副本）保证一致性。
+        """
+        all_data = self.vector_store.get()
+
+        if not all_data["documents"]:
+            self._bm25_retriever = None
+            return
+
+        documents = [
+            Document(page_content=text, metadata=meta or {})
+            for text, meta in zip(all_data["documents"], all_data["metadatas"])
+        ]
+
+        self._bm25_retriever = BM25Retriever.from_documents(documents, k=self.bm25_top_k)
+        logger.info(f"BM25 索引重建完成，文档数: {len(documents)}")
+
+    def _rrf_fusion(
+        self,
+        vector_docs: list[Document],
+        bm25_docs: list[Document],
+    ) -> list[Document]:
+        """
+        RRF（Reciprocal Rank Fusion）融合两组检索结果。
+
+        RRF_score(d) = Σ 1 / (k + rank_i(d))
+
+        为什么用 RRF 而不是加权平均？
+        - RRF 不需要调权重参数，对两个检索器的分数尺度差异不敏感
+        - 向量检索的余弦相似度和 BM25 的 BM25 分数量纲完全不同，直接加权不合理
+        - RRF 只看排名位置，天然适配不同检索器的结果融合
+        """
+        doc_scores: dict[str, tuple[float, Document]] = {}
+
+        for rank, doc in enumerate(vector_docs, start=1):
+            key = doc.page_content[:100]
+            score = 1.0 / (self.rrf_k + rank)
+            if key in doc_scores:
+                doc_scores[key] = (doc_scores[key][0] + score, doc_scores[key][1])
+            else:
+                doc_scores[key] = (score, doc)
+
+        for rank, doc in enumerate(bm25_docs, start=1):
+            key = doc.page_content[:100]
+            score = 1.0 / (self.rrf_k + rank)
+            if key in doc_scores:
+                doc_scores[key] = (doc_scores[key][0] + score, doc_scores[key][1])
+            else:
+                doc_scores[key] = (score, doc)
+
+        sorted_items = sorted(doc_scores.values(), key=lambda x: x[0], reverse=True)
+        return [doc for _, doc in sorted_items]
+
+    def hybrid_search(self, query: str, top_k: int | None = None) -> list[Document]:
+        """
+        混合检索：向量检索 + BM25 检索 → RRF 融合。
+
+        返回融合后的 top_k 个文档。
+        """
+        search_k = top_k or self.bm25_top_k
+
+        # 向量检索
+        vector_docs = self.search(query, top_k=search_k)
+
+        # BM25 检索
+        if self._bm25_retriever is None:
+            self._build_bm25_index()
+
+        if self._bm25_retriever:
+            bm25_docs = self._bm25_retriever.invoke(query)
+        else:
+            bm25_docs = []
+
+        if not bm25_docs:
+            return vector_docs
+
+        # RRF 融合
+        fused_docs = self._rrf_fusion(vector_docs, bm25_docs)
+        return fused_docs[:search_k]
 
 
     def delete_by_document_id(self, document_id: int):
@@ -220,6 +317,10 @@ class VectorStoreService:
         前提：入库时每个 chunk 的 metadata 中已经写入 document_id。
         """
         self.vector_store.delete(where={"document_id": document_id})
+
+        # 重建 BM25 索引，保持与 Chroma 同步
+        if self.hybrid_enabled:
+            self._build_bm25_index()
 
     def remove_md5_by_file_path(self, file_path: str):
         """
@@ -259,3 +360,6 @@ class VectorStoreService:
             embedding_function=embed_model,
             persist_directory=persist_dir,
         )
+
+        # 清空 BM25 索引
+        self._bm25_retriever = None

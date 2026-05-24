@@ -1,2 +1,8 @@
 chat_model_name: qwen-plus
 embedding_model_name: text-embedding-v4
+
+# Reranker 配置
+reranker:
+  model: gte-rerank-v2      # DashScope rerank 模型名
+  top_n: 5                   # rerank 后保留的文档数
+  retrieve_top_k: 15         # rerank 前从向量库检索的文档数（粗筛数量）

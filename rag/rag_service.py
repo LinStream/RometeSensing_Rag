@@ -18,7 +18,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 
 from model.factory import chat_model
+from rag.reranker import DashScopeReranker
 from rag.vector_store import VectorStoreService
+from utils.config_handler import rag_conf
 from utils.prompt_loader import load_rag_prompts
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,14 @@ class RagSummarizeService:
         self.model = chat_model
         self.chain = self._init_chain()
 
+        # Reranker 初始化
+        reranker_conf = rag_conf.get("reranker", {})
+        self.reranker = DashScopeReranker(
+            model=reranker_conf.get("model", "gte-rerank-v2"),
+            top_n=reranker_conf.get("top_n", 5),
+        )
+        self.retrieve_top_k = reranker_conf.get("retrieve_top_k", 15)
+
     def _init_chain(self):
         """
         LCEL 链：
@@ -49,12 +59,53 @@ class RagSummarizeService:
 
     def retriever_docs(self, query: str, top_k: int | None = None) -> list[Document]:
         """
-        检索相关资料。
-        """
-        if top_k is None:
-            return self.retriever.invoke(query)
+        检索相关资料，含混合检索和 rerank 步骤。
 
-        return self.vector_store.search(query, top_k=top_k)
+        流程：
+        1. 粗筛：混合检索（向量+BM25）或纯向量检索，取 retrieve_top_k 个候选
+        2. 精排：reranker 重排，取 top_n 个
+        """
+        retrieve_k = max(top_k or self.reranker.top_n, self.retrieve_top_k)
+
+        # 第一步：粗筛
+        if self.vector_store.hybrid_enabled:
+            raw_docs = self.vector_store.hybrid_search(query, top_k=retrieve_k)
+        else:
+            raw_docs = self.vector_store.search(query, top_k=retrieve_k)
+
+        if not raw_docs:
+            return []
+
+        # 第二步：精排（reranker 重排）
+        return self._rerank_docs(query, raw_docs)
+
+    def _rerank_docs(self, query: str, docs: list[Document]) -> list[Document]:
+        """
+        用 reranker 对检索结果重排。
+
+        流程：
+        1. 把每个 Document 的 page_content 提取为字符串列表
+        2. 调用 reranker API，拿到按相关性排序后的 index 列表
+        3. 按新顺序重组 Document 列表
+        """
+        if not docs:
+            return []
+
+        doc_texts = [doc.page_content for doc in docs]
+        rerank_results = self.reranker.rerank(query, doc_texts)
+
+        if not rerank_results:
+            return docs[: self.reranker.top_n]
+
+        reranked = []
+        for r in rerank_results:
+            idx = r["index"]
+            if 0 <= idx < len(docs):
+                doc = docs[idx]
+                doc.metadata["relevance_score"] = r["relevance_score"]
+                reranked.append(doc)
+
+        return reranked
 
     def _format_context(self, context_docs: list[Document]) -> str:
         """
@@ -140,6 +191,7 @@ class RagSummarizeService:
                     "page": int(page) + 1 if page is not None else None,
                     "text": doc.page_content,
                     "metadata": doc.metadata,
+                    "relevance_score": doc.metadata.get("relevance_score"),
                 }
             )
 
